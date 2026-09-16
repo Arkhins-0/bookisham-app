@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Bookisham" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/paper</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <!-- The mark on paper while the app starts (the LoadingScreen of the web app). -->
+    <style name="Theme.Bookisham.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/paper</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.Bookisham</item>
+    </style>
+</resources>

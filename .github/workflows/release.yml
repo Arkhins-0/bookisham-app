@@ -1,0 +1,86 @@
+name: Release
+
+# Push a tag like v1.0.1 to build the app and publish a GitHub Release with
+# the APKs attached. The release APK is signed with the keystore held in the
+# repository secrets below; without them it is built unsigned and will not
+# install on a device.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # A step's `if:` can't reference `secrets` directly, so its presence
+      # is surfaced here first, as a plain env var, and checked from there.
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Decode signing key
+        if: ${{ env.HAS_KEYSTORE == 'true' }}
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > release.keystore.jks
+          echo "BOOKISHAM_KEYSTORE_PATH=release.keystore.jks" >> "$GITHUB_ENV"
+          echo "BOOKISHAM_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "BOOKISHAM_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> "$GITHUB_ENV"
+          echo "BOOKISHAM_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+      - name: Build
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease assembleDebug --no-daemon \
+            -Pbookisham.baseUrl="${{ vars.BOOKISHAM_BASE_URL || 'https://bookisham.arkhins.com' }}" \
+            -Pbookisham.whatsapp="${{ vars.BOOKISHAM_WHATSAPP || '917708204956' }}" \
+            -Pbookisham.contactEmail="${{ vars.BOOKISHAM_CONTACT_EMAIL || 'krishnavijay.gkv@gmail.com' }}"
+      - name: Stage APKs
+        # A flat, predictable layout for the release job to pick up — the
+        # exact Gradle output path isn't guaranteed to survive
+        # upload-artifact's own directory-structure rules.
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/*.apk dist/app-release.apk
+          cp app/build/outputs/apk/debug/*.apk dist/app-debug.apk
+      - name: Refuse to ship an unsigned release APK
+        # Android rejects an unsigned APK with "package appears to be invalid",
+        # so fail here, loudly, rather than publish one.
+        run: |
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          "$BT/apksigner" verify --print-certs dist/app-release.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apks
+          path: dist/
+
+  release:
+    needs: build
+    # Only a real tag push publishes a release; a manual workflow_dispatch
+    # run (used to test the build) stops after the build job, above.
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: apks
+          path: apks
+      - name: Rename and checksum
+        run: |
+          mkdir -p dist
+          cp apks/app-release.apk "dist/Bookisham-${{ github.ref_name }}.apk"
+          cp apks/app-debug.apk "dist/Bookisham-debug-${{ github.ref_name }}.apk"
+          cd dist && sha256sum * > SHA256SUMS.txt
+          ls -la
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

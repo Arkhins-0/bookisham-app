@@ -1,0 +1,24 @@
+# Gradle / Android Studio
+.gradle/
+.kotlin/
+.idea/
+*.iml
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+local.properties
+
+# Build outputs: uploaded to GitHub Releases, not tracked in git.
+*.apk
+*.aab
+/dist/
+
+# Signing keys: never commit these.
+*.jks
+*.keystore
+
+# OS / tooling noise
+.DS_Store
+Thumbs.db
+/.claude/
