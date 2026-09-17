@@ -11,6 +11,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bookisham.app.BookishamApplication
 import com.bookisham.app.BuildConfig
+import com.bookisham.app.data.AppUpdater
 import com.bookisham.app.data.AppVersionInfo
 import com.bookisham.app.data.Book
 import com.bookisham.app.data.Me
@@ -19,6 +20,7 @@ import com.bookisham.app.data.PickedFile
 import com.bookisham.app.data.UnauthorizedException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
 
 /** A ViewModel built by [create], scoped to the nearest owner (the activity or the navigation entry). */
 @Composable
@@ -34,6 +36,17 @@ sealed interface SessionState {
     data class SignedIn(val me: Me) : SessionState
 }
 
+/** How far an in-app update has got. */
+sealed interface UpdateStage {
+    data object Idle : UpdateStage
+
+    /** [fraction] runs 0f..1f, or -1f while the size is unknown. */
+    data class Downloading(val fraction: Float) : UpdateStage
+    data object NeedsPermission : UpdateStage
+    data object Installing : UpdateStage
+    data class Failed(val message: String) : UpdateStage
+}
+
 class AppViewModel(private val app: BookishamApplication) : ViewModel() {
     var session: SessionState by mutableStateOf(SessionState.Loading)
         private set
@@ -43,6 +56,11 @@ class AppViewModel(private val app: BookishamApplication) : ViewModel() {
         private set
     var updateDismissed: Boolean by mutableStateOf(false)
         private set
+    var updateStage: UpdateStage by mutableStateOf(UpdateStage.Idle)
+        private set
+
+    private val updater by lazy { AppUpdater(app) }
+    private var downloaded: File? = null
 
     init {
         refresh()
@@ -60,6 +78,40 @@ class AppViewModel(private val app: BookishamApplication) : ViewModel() {
     fun dismissUpdate() {
         updateDismissed = true
     }
+
+    /** Bring the update dialog back — the Account page's own button. */
+    fun showUpdate() {
+        updateDismissed = false
+    }
+
+    /** Fetch the release APK and hand it straight to the installer. */
+    fun downloadAndInstall() {
+        val url = updateInfo?.apkUrl ?: return
+        if (updateStage is UpdateStage.Downloading) return
+        updateStage = UpdateStage.Downloading(0f)
+        viewModelScope.launch {
+            try {
+                downloaded = updater.download(url) { updateStage = UpdateStage.Downloading(it) }
+                install()
+            } catch (e: Exception) {
+                updateStage = UpdateStage.Failed(e.message ?: "The update could not be downloaded.")
+            }
+        }
+    }
+
+    /** Ask Android to install what was downloaded, once it is allowed to. */
+    fun install() {
+        val file = downloaded ?: return
+        if (!updater.canInstall()) {
+            updateStage = UpdateStage.NeedsPermission
+            return
+        }
+        updateStage = UpdateStage.Installing
+        runCatching { updater.install(file) }
+            .onFailure { updateStage = UpdateStage.Failed(it.message ?: "The installer could not be opened.") }
+    }
+
+    fun openInstallSettings() = updater.openInstallSettings()
 
     /** Ask the server who the stored token belongs to. */
     fun refresh() {

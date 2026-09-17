@@ -33,6 +33,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +46,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.navArgument
 import com.bookisham.app.LocalApp
 import com.bookisham.app.data.Me
@@ -87,12 +91,26 @@ fun BookishamApp() {
         is SessionState.SignedIn -> SignedInFlow(state.me, vm)
     }
 
+    // Back from the "allow installs" settings screen: carry on where we left off.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && vm.updateStage is UpdateStage.NeedsPermission) vm.install()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     val update = vm.updateInfo
     if (update != null && !vm.updateDismissed) {
         UpdateAvailableDialog(
             info = update,
-            onUpdate = {
-                uri.openSafely(update.apkUrl ?: update.releaseUrl)
+            stage = vm.updateStage,
+            onUpdate = vm::downloadAndInstall,
+            onInstall = vm::install,
+            onOpenSettings = vm::openInstallSettings,
+            onOpenReleasePage = {
+                uri.openSafely(update.releaseUrl)
                 vm.dismissUpdate()
             },
             onDismiss = vm::dismissUpdate,
@@ -257,6 +275,7 @@ private fun SignedInFlow(me: Me, vm: AppViewModel) {
                     onNameSaved = vm::nameChanged,
                     onLogout = vm::logout,
                     onSignedOut = vm::signedOut,
+                    onUpdate = vm::showUpdate,
                     onOpenTerms = { nav.navigate("legal/terms") },
                     onOpenPrivacy = { nav.navigate("legal/privacy") },
                 )

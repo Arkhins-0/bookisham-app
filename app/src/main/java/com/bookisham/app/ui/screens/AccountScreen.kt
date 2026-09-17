@@ -70,6 +70,7 @@ fun AccountScreen(
     onNameSaved: (String) -> Unit,
     onLogout: () -> Unit,
     onSignedOut: () -> Unit,
+    onUpdate: () -> Unit,
     onOpenTerms: () -> Unit,
     onOpenPrivacy: () -> Unit,
 ) {
@@ -217,11 +218,7 @@ fun AccountScreen(
                 Spacer(Modifier.height(4.dp))
                 Text("v${updateInfo.version} is available.", style = MaterialTheme.typography.bodyMedium, color = Ember)
                 Spacer(Modifier.height(16.dp))
-                Pill(
-                    "Update app",
-                    onClick = { uri.openSafely(updateInfo.apkUrl ?: updateInfo.releaseUrl) },
-                    icon = Icons.Filled.SystemUpdate,
-                )
+                Pill("Update app", onClick = onUpdate, icon = Icons.Filled.SystemUpdate)
             } else {
                 Spacer(Modifier.height(4.dp))
                 Text("You're up to date.", style = MaterialTheme.typography.bodySmall, color = InkFaint)
