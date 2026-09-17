@@ -36,9 +36,13 @@ jobs:
           echo "BOOKISHAM_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> "$GITHUB_ENV"
           echo "BOOKISHAM_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> "$GITHUB_ENV"
       - name: Build
+        # gradle.properties caps the heap at 1536m for a development machine
+        # with a small paging file. A runner has 16 GB, and R8 plus an
+        # in-process Kotlin compile of both variants wants more than that.
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease assembleDebug --no-daemon \
+          ./gradlew assembleRelease assembleDebug --no-daemon --stacktrace \
+            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" \
             -Pbookisham.baseUrl="${{ vars.BOOKISHAM_BASE_URL || 'https://bookisham.arkhins.com' }}" \
             -Pbookisham.whatsapp="${{ vars.BOOKISHAM_WHATSAPP || '917708204956' }}" \
             -Pbookisham.contactEmail="${{ vars.BOOKISHAM_CONTACT_EMAIL || 'krishnavijay.gkv@gmail.com' }}"
