@@ -140,8 +140,13 @@ class ApiClient(private val session: SessionStore) {
 
     suspend fun me(): Me = call("/api/me")
 
-    /** The latest GitHub release of this app — public, works whether signed in or not. */
-    suspend fun appVersion(): AppVersionInfo = call("/api/app-version")
+    /**
+     * The latest GitHub release of this app — public, works whether signed
+     * in or not. [fresh] is a reader asking outright, and skips the
+     * server's own half-hour cache.
+     */
+    suspend fun appVersion(fresh: Boolean = false): AppVersionInfo =
+        call(if (fresh) "/api/app-version?fresh=1" else "/api/app-version")
 
     /** Terms & Conditions and Privacy Policy — public. */
     suspend fun legal(): LegalDocs = call("/api/legal")

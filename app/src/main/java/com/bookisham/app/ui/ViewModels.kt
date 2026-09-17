@@ -58,6 +58,10 @@ class AppViewModel(private val app: BookishamApplication) : ViewModel() {
         private set
     var updateStage: UpdateStage by mutableStateOf(UpdateStage.Idle)
         private set
+    var checkingUpdate: Boolean by mutableStateOf(false)
+        private set
+    var updateCheckError: String? by mutableStateOf(null)
+        private set
 
     private val updater by lazy { AppUpdater(app) }
     private var downloaded: File? = null
@@ -67,11 +71,26 @@ class AppViewModel(private val app: BookishamApplication) : ViewModel() {
         checkForUpdate()
     }
 
-    /** Checked once per app open — an update popup that reappears on every screen would be worse than none. */
-    fun checkForUpdate() {
+    /**
+     * On launch this runs quietly, once — an update popup that reappeared
+     * on every screen would be worse than none. [force] is the Account
+     * page asking outright: it looks past the server's cache, says so when
+     * it fails, and opens the dialog if there is something to show.
+     */
+    fun checkForUpdate(force: Boolean = false) {
+        if (checkingUpdate) return
+        checkingUpdate = true
+        updateCheckError = null
         viewModelScope.launch {
-            val info = runCatching { app.api.appVersion() }.getOrNull() ?: return@launch
-            if (isNewerVersion(info.version, BuildConfig.VERSION_NAME)) updateInfo = info
+            try {
+                val info = app.api.appVersion(fresh = force)
+                val newer = isNewerVersion(info.version, BuildConfig.VERSION_NAME)
+                updateInfo = if (newer) info else null
+                if (newer && force) updateDismissed = false
+            } catch (e: Exception) {
+                if (force) updateCheckError = e.message ?: "Could not check for updates."
+            }
+            checkingUpdate = false
         }
     }
 

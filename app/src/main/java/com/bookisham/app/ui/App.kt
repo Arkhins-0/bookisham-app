@@ -1,5 +1,10 @@
 package com.bookisham.app.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -34,11 +39,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavType
@@ -84,6 +92,8 @@ fun BookishamApp() {
     val vm = rememberViewModel { AppViewModel(app) }
     val uri = LocalUriHandler.current
 
+    AskToPostNotifications()
+
     when (val state = vm.session) {
         SessionState.Loading -> LoadingScreen()
         is SessionState.Failed -> FailedScreen(state.message, onRetry = vm::refresh, onSignOut = vm::logout)
@@ -115,6 +125,19 @@ fun BookishamApp() {
             },
             onDismiss = vm::dismissUpdate,
         )
+    }
+}
+
+/** Android 13 and up ask before an app may put anything in the tray. Asked once, on first launch. */
+@Composable
+private fun AskToPostNotifications() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+    val context = LocalContext.current
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    LaunchedEffect(Unit) {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!granted) launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 }
 
@@ -272,10 +295,13 @@ private fun SignedInFlow(me: Me, vm: AppViewModel) {
                 AccountScreen(
                     me,
                     updateInfo = vm.updateInfo,
+                    checkingUpdate = vm.checkingUpdate,
+                    updateCheckError = vm.updateCheckError,
                     onNameSaved = vm::nameChanged,
                     onLogout = vm::logout,
                     onSignedOut = vm::signedOut,
                     onUpdate = vm::showUpdate,
+                    onCheckUpdate = { vm.checkForUpdate(force = true) },
                     onOpenTerms = { nav.navigate("legal/terms") },
                     onOpenPrivacy = { nav.navigate("legal/privacy") },
                 )

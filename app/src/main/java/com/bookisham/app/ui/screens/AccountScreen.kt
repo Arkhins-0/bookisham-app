@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -56,6 +58,7 @@ import com.bookisham.app.ui.components.PillStyle
 import com.bookisham.app.ui.components.TextBox
 import com.bookisham.app.ui.components.openSafely
 import com.bookisham.app.ui.theme.Ember
+import com.bookisham.app.ui.theme.EmberDark
 import com.bookisham.app.ui.theme.Ink
 import com.bookisham.app.ui.theme.InkFaint
 import com.bookisham.app.ui.theme.InkSoft
@@ -67,10 +70,13 @@ import kotlinx.coroutines.launch
 fun AccountScreen(
     me: Me,
     updateInfo: AppVersionInfo?,
+    checkingUpdate: Boolean,
+    updateCheckError: String?,
     onNameSaved: (String) -> Unit,
     onLogout: () -> Unit,
     onSignedOut: () -> Unit,
     onUpdate: () -> Unit,
+    onCheckUpdate: () -> Unit,
     onOpenTerms: () -> Unit,
     onOpenPrivacy: () -> Unit,
 ) {
@@ -210,18 +216,36 @@ fun AccountScreen(
 
 
         Spacer(Modifier.height(16.dp))
-        PaperCard {
-            Text("App version", style = MaterialTheme.typography.titleLarge)
+        PaperCard(Modifier.clickable(enabled = !checkingUpdate, onClick = onCheckUpdate)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("App version", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                if (checkingUpdate) {
+                    CircularProgressIndicator(Modifier.size(16.dp), color = Ember, strokeWidth = 2.dp)
+                } else {
+                    Icon(
+                        Icons.Outlined.Refresh,
+                        contentDescription = "Check for updates",
+                        tint = InkFaint,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
             Spacer(Modifier.height(12.dp))
             Text("You have v${BuildConfig.VERSION_NAME}.", style = MaterialTheme.typography.bodyMedium, color = InkSoft)
-            if (updateInfo != null) {
-                Spacer(Modifier.height(4.dp))
-                Text("v${updateInfo.version} is available.", style = MaterialTheme.typography.bodyMedium, color = Ember)
+            Spacer(Modifier.height(4.dp))
+            when {
+                checkingUpdate ->
+                    Text("Checking for updates…", style = MaterialTheme.typography.bodySmall, color = InkFaint)
+                updateCheckError != null ->
+                    Text(updateCheckError, style = MaterialTheme.typography.bodySmall, color = EmberDark)
+                updateInfo != null ->
+                    Text("v${updateInfo.version} is available.", style = MaterialTheme.typography.bodyMedium, color = Ember)
+                else ->
+                    Text("You're up to date. Tap to check again.", style = MaterialTheme.typography.bodySmall, color = InkFaint)
+            }
+            if (updateInfo != null && !checkingUpdate) {
                 Spacer(Modifier.height(16.dp))
                 Pill("Update app", onClick = onUpdate, icon = Icons.Filled.SystemUpdate)
-            } else {
-                Spacer(Modifier.height(4.dp))
-                Text("You're up to date.", style = MaterialTheme.typography.bodySmall, color = InkFaint)
             }
         }
 
