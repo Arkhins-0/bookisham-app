@@ -107,6 +107,7 @@ import com.bookisham.app.ui.theme.Ember
 import com.bookisham.app.ui.theme.Night
 import com.bookisham.app.ui.theme.NightLine
 import com.bookisham.app.ui.theme.NightPanel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
@@ -367,6 +368,11 @@ private fun PageSlot(n: Int, width: Dp, ratio: Float, watermark: TextLayoutResul
                 bitmap = vm.load(n)
             } catch (e: UnauthorizedException) {
                 vm.signedOut = true
+            } catch (e: CancellationException) {
+                // The slot scrolled away mid-load: Compose cancelling the work is
+                // routine, not a failure. Rethrow so the page is neither marked
+                // failed nor reported in the error toast.
+                throw e
             } catch (e: Exception) {
                 failed = true
                 vm.error = e.message ?: "A page could not be loaded. Check your connection and try again."
