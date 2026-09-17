@@ -70,11 +70,17 @@ import com.bookisham.app.ui.theme.PaperDeep
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AdminReadersScreen(onOpenUser: (String) -> Unit, onOpenBooks: () -> Unit, onSignedOut: () -> Unit) {
+fun AdminReadersScreen(
+    onOpenUser: (String) -> Unit,
+    onOpenBooks: () -> Unit,
+    onOpenPurchases: () -> Unit,
+    onSignedOut: () -> Unit,
+) {
     val app = LocalApp.current
     val vm = rememberViewModel(key = "admin-users") { AdminUsersViewModel(app) }
     if (vm.signedOut) LaunchedEffect(Unit) { onSignedOut() }
     var sheetOpen by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
 
     PullToRefreshBox(
         isRefreshing = vm.refreshing,
@@ -84,7 +90,13 @@ fun AdminReadersScreen(onOpenUser: (String) -> Unit, onOpenBooks: () -> Unit, on
         LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp)) {
             item {
                 Column(Modifier.padding(horizontal = 20.dp, vertical = 24.dp)) {
-                    AdminSectionTabs(AdminSection.Readers) { if (it == AdminSection.Books) onOpenBooks() }
+                    AdminSectionTabs(AdminSection.Readers) {
+                        when (it) {
+                            AdminSection.Books -> onOpenBooks()
+                            AdminSection.Purchases -> onOpenPurchases()
+                            AdminSection.Readers -> {}
+                        }
+                    }
                     Spacer(Modifier.height(16.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -100,10 +112,13 @@ fun AdminReadersScreen(onOpenUser: (String) -> Unit, onOpenBooks: () -> Unit, on
                         style = MaterialTheme.typography.bodyMedium,
                         color = InkFaint,
                     )
+                    Spacer(Modifier.height(16.dp))
+                    FieldLabel("Search by name, email or phone")
+                    TextBox(query, { query = it }, imeAction = ImeAction.Search)
                 }
             }
 
-            val users = vm.users
+            val users = vm.users?.filter { it.matches(query) }
             val error = vm.error
             when {
                 users == null && error != null -> item {
@@ -119,7 +134,12 @@ fun AdminReadersScreen(onOpenUser: (String) -> Unit, onOpenBooks: () -> Unit, on
                     }
                 }
                 users.isEmpty() -> item {
-                    Box(Modifier.padding(horizontal = 20.dp)) { EmptyCard("No readers yet", "Create the first one above.") }
+                    Box(Modifier.padding(horizontal = 20.dp)) {
+                        EmptyCard(
+                            if (query.isBlank()) "No readers yet" else "No readers match that search",
+                            if (query.isBlank()) "Create the first one above." else "",
+                        )
+                    }
                 }
                 else -> items(users, key = { it.id }) { user ->
                     ReaderRow(user, onClick = { onOpenUser(user.id) })

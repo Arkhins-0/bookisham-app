@@ -8,6 +8,7 @@ data class AdminUser(
     val id: String,
     val email: String,
     val name: String = "",
+    val phone: String = "",
     val role: String = "user",
     val disabled: Boolean = false,
     val createdAt: String = "",
@@ -15,6 +16,13 @@ data class AdminUser(
     val lastSeenAt: String? = null,
 ) {
     val displayName: String get() = name.ifBlank { email }
+
+    /** Whether this row matches a free-text search over name, email and phone. */
+    fun matches(query: String): Boolean {
+        if (query.isBlank()) return true
+        val q = query.trim()
+        return name.contains(q, ignoreCase = true) || email.contains(q, ignoreCase = true) || phone.contains(q, ignoreCase = true)
+    }
 }
 
 @Serializable
@@ -63,6 +71,8 @@ data class AdminBook(
     val pages: Int = 0,
     val readers: Int = 0,
     val createdAt: String = "",
+    val price: Double? = null,
+    val discountPercent: Int? = null,
 )
 
 @Serializable
@@ -93,7 +103,28 @@ data class UploadedBook(
     val author: String = "",
     val format: String = "pdf",
     val pages: Int = 0,
+    val price: Double? = null,
+    val discountPercent: Int? = null,
 )
+
+/** GET /api/admin/purchase-requests — one row of the approvals list. */
+@Serializable
+data class AdminPurchaseRequest(
+    val id: String,
+    val userId: String,
+    val userName: String = "",
+    val userEmail: String = "",
+    val bookId: String,
+    val bookTitle: String,
+    val amount: Double,
+    val status: String = "pending", // "pending" | "approved" | "rejected"
+    val createdAt: String,
+) {
+    val displayUser: String get() = userName.ifBlank { userEmail }
+}
+
+@Serializable
+internal data class AdminPurchaseRequestList(val requests: List<AdminPurchaseRequest> = emptyList())
 
 /* Request bodies */
 
@@ -105,3 +136,6 @@ internal data class UserActionBody(val action: String, val password: String? = n
 
 @Serializable
 internal data class SetBooksBody(val bookIds: List<String>)
+
+@Serializable
+internal data class PurchaseRequestActionBody(val action: String)

@@ -15,6 +15,12 @@ object Config {
     const val POWERED_BY_NAME = "arkhins.com"
     const val POWERED_BY_URL = "https://arkhins.com"
 
+    /** Prefix for a book's price, wherever one is shown. */
+    const val CURRENCY_SYMBOL = "₹"
+
+    /** Where a manual UPI payment for a book purchase request goes. */
+    const val UPI_ID = "krishnavijay.gkv@okicici"
+
     /** The admin panel is the web app; the phone opens it in the browser. */
     val ADMIN_URL: String get() = "$BASE_URL/admin"
 }

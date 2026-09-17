@@ -4,6 +4,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -12,15 +13,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -32,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavType
@@ -47,15 +53,21 @@ import com.bookisham.app.ui.components.LoadingScreen
 import com.bookisham.app.ui.components.LogoRow
 import com.bookisham.app.ui.components.Pill
 import com.bookisham.app.ui.components.PillStyle
+import com.bookisham.app.ui.components.UpdateAvailableDialog
+import com.bookisham.app.ui.components.openSafely
 import com.bookisham.app.ui.reader.ReaderScreen
 import com.bookisham.app.ui.screens.AccountScreen
 import com.bookisham.app.ui.screens.AdminBooksScreen
+import com.bookisham.app.ui.screens.AdminPurchasesScreen
 import com.bookisham.app.ui.screens.AdminReadersScreen
 import com.bookisham.app.ui.screens.AdminUserDetailScreen
 import com.bookisham.app.ui.screens.BrowseScreen
 import com.bookisham.app.ui.screens.LandingScreen
+import com.bookisham.app.ui.screens.LegalScreen
 import com.bookisham.app.ui.screens.LibraryScreen
 import com.bookisham.app.ui.screens.LoginScreen
+import com.bookisham.app.ui.screens.NotificationsScreen
+import com.bookisham.app.ui.screens.SignupScreen
 import com.bookisham.app.ui.theme.Ember
 import com.bookisham.app.ui.theme.Ink
 import com.bookisham.app.ui.theme.InkFaint
@@ -66,12 +78,25 @@ import com.bookisham.app.ui.theme.Paper
 fun BookishamApp() {
     val app = LocalApp.current
     val vm = rememberViewModel { AppViewModel(app) }
+    val uri = LocalUriHandler.current
 
     when (val state = vm.session) {
         SessionState.Loading -> LoadingScreen()
         is SessionState.Failed -> FailedScreen(state.message, onRetry = vm::refresh, onSignOut = vm::logout)
         SessionState.SignedOut -> SignedOutFlow(onSignedIn = vm::signedIn)
         is SessionState.SignedIn -> SignedInFlow(state.me, vm)
+    }
+
+    val update = vm.updateInfo
+    if (update != null && !vm.updateDismissed) {
+        UpdateAvailableDialog(
+            info = update,
+            onUpdate = {
+                uri.openSafely(update.apkUrl ?: update.releaseUrl)
+                vm.dismissUpdate()
+            },
+            onDismiss = vm::dismissUpdate,
+        )
     }
 }
 
@@ -106,8 +131,38 @@ private fun SignedOutFlow(onSignedIn: () -> Unit) {
         popEnterTransition = { fadeIn() },
         popExitTransition = { fadeOut() },
     ) {
-        composable("landing") { LandingScreen(onSignIn = { nav.navigate("login") }) }
-        composable("login") { LoginScreen(onBack = { nav.popBackStack() }, onSignedIn = onSignedIn) }
+        composable("landing") {
+            LandingScreen(
+                onSignIn = { nav.navigate("login") },
+                onCreateAccount = { nav.navigate("signup") },
+            )
+        }
+        composable("login") {
+            LoginScreen(
+                onBack = { nav.popBackStack() },
+                onCreateAccount = { nav.navigate("signup") },
+                onSignedIn = onSignedIn,
+            )
+        }
+        composable("signup") {
+            SignupScreen(
+                onBack = { nav.popBackStack() },
+                onSignIn = { nav.navigate("login") { popUpTo("signup") { inclusive = true } } },
+                onSignedIn = onSignedIn,
+                onOpenTerms = { nav.navigate("legal/terms") },
+                onOpenPrivacy = { nav.navigate("legal/privacy") },
+            )
+        }
+        composable(
+            "legal/{kind}",
+            arguments = listOf(navArgument("kind") { type = NavType.StringType }),
+        ) { entry ->
+            LegalScreen(
+                kind = entry.arguments?.getString("kind").orEmpty(),
+                standalone = true,
+                onBack = { nav.popBackStack() },
+            )
+        }
     }
 }
 
@@ -115,6 +170,8 @@ private data class Tab(val route: String, val label: String, val icon: ImageVect
 
 @Composable
 private fun SignedInFlow(me: Me, vm: AppViewModel) {
+    val app = LocalApp.current
+    val notificationsVm = rememberViewModel(key = "notifications") { NotificationsViewModel(app) }
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
@@ -128,12 +185,23 @@ private fun SignedInFlow(me: Me, vm: AppViewModel) {
         else add(Tab("browse", "Browse", Icons.Outlined.Explore))
         add(Tab("account", "Account", Icons.Outlined.Person))
     }
-    // The admin section has two screens ("admin", "adminBooks") behind one tab.
-    fun tabSelected(tab: Tab) = route == tab.route || (tab.route == "admin" && route == "adminBooks")
+    // The admin section has three screens ("admin", "adminBooks", "adminPurchases") behind one tab.
+    fun tabSelected(tab: Tab) = route == tab.route || (tab.route == "admin" && (route == "adminBooks" || route == "adminPurchases"))
 
     Scaffold(
         containerColor = Paper,
-        topBar = { if (!hideChrome) AppTopBar(onLogout = vm::logout) },
+        topBar = {
+            if (!hideChrome) {
+                AppTopBar(
+                    unreadNotifications = notificationsVm.unreadCount,
+                    onOpenNotifications = {
+                        notificationsVm.load()
+                        nav.navigate("notifications") { launchSingleTop = true }
+                    },
+                    onLogout = vm::logout,
+                )
+            }
+        },
         bottomBar = {
             if (!hideChrome) {
                 NavigationBar(containerColor = Paper, tonalElevation = 0.dp) {
@@ -141,6 +209,9 @@ private fun SignedInFlow(me: Me, vm: AppViewModel) {
                         NavigationBarItem(
                             selected = tabSelected(tab),
                             onClick = {
+                                // The notifications feed sits above whichever tab opened it. Drop it
+                                // before switching, or the tab's saved state would bring it back.
+                                if (route == "notifications") nav.popBackStack()
                                 if (!tabSelected(tab)) {
                                     nav.navigate(tab.route) {
                                         popUpTo("library") { saveState = true }
@@ -180,13 +251,34 @@ private fun SignedInFlow(me: Me, vm: AppViewModel) {
                 BrowseScreen(me, onOpen = { nav.navigate("read/$it") }, onSignedOut = vm::signedOut)
             }
             composable("account") {
-                AccountScreen(me, onNameSaved = vm::nameChanged, onLogout = vm::logout, onSignedOut = vm::signedOut)
+                AccountScreen(
+                    me,
+                    updateInfo = vm.updateInfo,
+                    onNameSaved = vm::nameChanged,
+                    onLogout = vm::logout,
+                    onSignedOut = vm::signedOut,
+                    onOpenTerms = { nav.navigate("legal/terms") },
+                    onOpenPrivacy = { nav.navigate("legal/privacy") },
+                )
+            }
+            composable(
+                "legal/{kind}",
+                arguments = listOf(navArgument("kind") { type = NavType.StringType }),
+            ) { entry ->
+                LegalScreen(
+                    kind = entry.arguments?.getString("kind").orEmpty(),
+                    standalone = false,
+                    onBack = { nav.popBackStack() },
+                )
             }
             composable("admin") {
                 AdminReadersScreen(
                     onOpenUser = { nav.navigate("adminUser/$it") },
                     onOpenBooks = {
                         nav.navigate("adminBooks") { popUpTo("admin") { inclusive = true } }
+                    },
+                    onOpenPurchases = {
+                        nav.navigate("adminPurchases") { popUpTo("admin") { inclusive = true } }
                     },
                     onSignedOut = vm::signedOut,
                 )
@@ -197,6 +289,27 @@ private fun SignedInFlow(me: Me, vm: AppViewModel) {
                     onOpenReaders = {
                         nav.navigate("admin") { popUpTo("adminBooks") { inclusive = true } }
                     },
+                    onOpenPurchases = {
+                        nav.navigate("adminPurchases") { popUpTo("adminBooks") { inclusive = true } }
+                    },
+                    onSignedOut = vm::signedOut,
+                )
+            }
+            composable("adminPurchases") {
+                AdminPurchasesScreen(
+                    onOpenReaders = {
+                        nav.navigate("admin") { popUpTo("adminPurchases") { inclusive = true } }
+                    },
+                    onOpenBooks = {
+                        nav.navigate("adminBooks") { popUpTo("adminPurchases") { inclusive = true } }
+                    },
+                    onSignedOut = vm::signedOut,
+                )
+            }
+            composable("notifications") {
+                NotificationsScreen(
+                    vm = notificationsVm,
+                    onBack = { nav.popBackStack() },
                     onSignedOut = vm::signedOut,
                 )
             }
@@ -226,7 +339,7 @@ private fun SignedInFlow(me: Me, vm: AppViewModel) {
 
 /** The bar across the top of every signed-in page but the reader. */
 @Composable
-private fun AppTopBar(onLogout: () -> Unit) {
+private fun AppTopBar(unreadNotifications: Int, onOpenNotifications: () -> Unit, onLogout: () -> Unit) {
     Column(Modifier.fillMaxWidth().background(Paper.copy(alpha = 0.92f))) {
         Row(
             Modifier
@@ -238,7 +351,23 @@ private fun AppTopBar(onLogout: () -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             LogoRow()
-            Pill("Sign out", onClick = onLogout, style = PillStyle.Ghost, compact = true, icon = Icons.AutoMirrored.Filled.Logout)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Box {
+                    IconButton(onClick = onOpenNotifications) {
+                        Icon(Icons.Filled.Notifications, contentDescription = "Notifications", tint = Ink)
+                    }
+                    if (unreadNotifications > 0) {
+                        Box(
+                            Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = 6.dp, end = 6.dp)
+                                .size(8.dp)
+                                .background(Ember, CircleShape),
+                        )
+                    }
+                }
+                Pill("Sign out", onClick = onLogout, style = PillStyle.Ghost, compact = true, icon = Icons.AutoMirrored.Filled.Logout)
+            }
         }
         HorizontalDivider(color = Ink.copy(alpha = 0.10f))
     }

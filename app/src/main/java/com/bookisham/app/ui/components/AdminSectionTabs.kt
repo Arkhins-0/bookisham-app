@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
+import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.Group
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -22,9 +23,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.bookisham.app.ui.theme.Ink
 
-enum class AdminSection { Readers, Books }
+enum class AdminSection { Readers, Books, Purchases }
 
-/** The Readers / Books switcher — the admin's own two-tab nav, mirroring the web layout. */
+/** The Readers / Books / Purchases switcher — the admin's own tab nav, mirroring the web layout. */
 @Composable
 fun AdminSectionTabs(current: AdminSection, onSelect: (AdminSection) -> Unit) {
     Row(
@@ -34,6 +35,7 @@ fun AdminSectionTabs(current: AdminSection, onSelect: (AdminSection) -> Unit) {
     ) {
         SectionTab("Readers", Icons.Outlined.Group, current == AdminSection.Readers) { onSelect(AdminSection.Readers) }
         SectionTab("Books", Icons.AutoMirrored.Outlined.LibraryBooks, current == AdminSection.Books) { onSelect(AdminSection.Books) }
+        SectionTab("Purchases", Icons.Outlined.CreditCard, current == AdminSection.Purchases) { onSelect(AdminSection.Purchases) }
     }
 }
 

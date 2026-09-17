@@ -109,9 +109,17 @@ class ApiClient(private val session: SessionStore) {
 
     /* -- Auth ----------------------------------------------------------- */
 
-    suspend fun login(email: String, password: String): LoginResponse = withContext(Dispatchers.IO) {
+    suspend fun login(email: String, password: String): LoginResponse =
+        authenticate("/api/auth/login", json.encodeToString(LoginBody(email.trim(), password)))
+
+    /** Self-service account creation — signs the new reader straight in, same as [login]. */
+    suspend fun signup(name: String, phone: String, email: String, password: String): LoginResponse =
+        authenticate("/api/auth/signup", json.encodeToString(SignupBody(name.trim(), phone.trim(), email.trim(), password)))
+
+    /** POST a credentials body, capture the session cookie the server sets, and decode the reply. */
+    private suspend fun authenticate(path: String, body: String): LoginResponse = withContext(Dispatchers.IO) {
         session.token = null
-        raw("/api/auth/login", "POST", json.encodeToString(LoginBody(email.trim(), password))).use { response ->
+        raw(path, "POST", body).use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) throw failure(response.code, text, signOutOn401 = false)
             val token = response.headers("Set-Cookie")
@@ -132,6 +140,12 @@ class ApiClient(private val session: SessionStore) {
 
     suspend fun me(): Me = call("/api/me")
 
+    /** The latest GitHub release of this app — public, works whether signed in or not. */
+    suspend fun appVersion(): AppVersionInfo = call("/api/app-version")
+
+    /** Terms & Conditions and Privacy Policy — public. */
+    suspend fun legal(): LegalDocs = call("/api/legal")
+
     /* -- Books ---------------------------------------------------------- */
 
     suspend fun library(): List<Book> = call<BookList>("/api/library").books
@@ -140,14 +154,15 @@ class ApiClient(private val session: SessionStore) {
 
     suspend fun openBook(id: String): BookOpen = call("/api/books/$id")
 
-    /** The cover as PNG bytes, or null when the book has none. */
+    /**
+     * The cover as PNG bytes, or null when the book has none or this reader
+     * can't see it (a locked book, say). Unlike other calls, a 401 here does
+     * not end the session — one book's cover being off-limits says nothing
+     * about whether the session itself is still good.
+     */
     suspend fun cover(id: String): ByteArray? = withContext(Dispatchers.IO) {
         raw("/api/books/$id/cover").use { response ->
-            when {
-                response.code == 401 -> throw failure(401, "")
-                !response.isSuccessful -> null
-                else -> response.body?.bytes()
-            }
+            if (!response.isSuccessful) null else response.body?.bytes()
         }
     }
 
@@ -170,6 +185,23 @@ class ApiClient(private val session: SessionStore) {
 
     suspend fun changePassword(currentPassword: String, newPassword: String): Ok =
         call("/api/account", "PATCH", json.encodeToString(AccountPatch(currentPassword = currentPassword, newPassword = newPassword)))
+
+    /* -- Purchases -------------------------------------------------------- */
+
+    /** Pay by UPI, attach the screenshot as proof, and ask the admin to grant the book. */
+    suspend fun submitPurchaseRequest(bookId: String, screenshot: PickedFile): PurchaseRequestResult {
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM).apply {
+            addFormDataPart("bookId", bookId)
+            addFormDataPart("screenshot", screenshot.name, ContentUriRequestBody(screenshot.resolver, screenshot.uri, screenshot.mediaType))
+        }.build()
+        return callBody("/api/purchase-requests", "POST", body)
+    }
+
+    /* -- Notifications ------------------------------------------------------ */
+
+    suspend fun notifications(): List<Notification> = call<NotificationList>("/api/notifications").notifications
+
+    suspend fun markNotificationsRead(): Ok = call("/api/notifications/read-all", "POST")
 
     /* -- Admin: readers --------------------------------------------------- */
 
@@ -215,6 +247,8 @@ class ApiClient(private val session: SessionStore) {
         allUsers: Boolean = false,
         file: PickedFile? = null,
         cover: PickedFile? = null,
+        price: String? = null,
+        discountPercent: String? = null,
     ): UploadedBook {
         val body = MultipartBody.Builder().setType(MultipartBody.FORM).apply {
             title?.let { addFormDataPart("title", it) }
@@ -222,11 +256,28 @@ class ApiClient(private val session: SessionStore) {
             if (allUsers) addFormDataPart("allUsers", "1")
             file?.let { addFormDataPart("file", it.name, ContentUriRequestBody(it.resolver, it.uri, it.mediaType)) }
             cover?.let { addFormDataPart("cover", it.name, ContentUriRequestBody(it.resolver, it.uri, it.mediaType)) }
+            price?.let { addFormDataPart("price", it) }
+            discountPercent?.let { addFormDataPart("discountPercent", it) }
         }.build()
 
         val path = if (bookId != null) "/api/admin/books/$bookId" else "/api/admin/books"
         val method = if (bookId != null) "PATCH" else "POST"
         return callBody(path, method, body)
+    }
+
+    /* -- Admin: purchases ---------------------------------------------------- */
+
+    suspend fun adminPurchaseRequests(): List<AdminPurchaseRequest> =
+        call<AdminPurchaseRequestList>("/api/admin/purchase-requests").requests
+
+    suspend fun adminPurchaseRequestAction(id: String, action: String): Ok =
+        call("/api/admin/purchase-requests/$id", "PATCH", json.encodeToString(PurchaseRequestActionBody(action)))
+
+    /** The payment screenshot for one request, admin only — same shape as [cover]. */
+    suspend fun purchaseRequestScreenshot(id: String): ByteArray? = withContext(Dispatchers.IO) {
+        raw("/api/admin/purchase-requests/$id/screenshot").use { response ->
+            if (!response.isSuccessful) null else response.body?.bytes()
+        }
     }
 
     private companion object {

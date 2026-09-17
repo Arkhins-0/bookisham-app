@@ -35,6 +35,7 @@ import com.bookisham.app.data.Book
 import com.bookisham.app.data.Me
 import com.bookisham.app.ui.ShelfViewModel
 import com.bookisham.app.ui.components.BookCard
+import com.bookisham.app.ui.components.BuyBookDialog
 import com.bookisham.app.ui.components.EmptyCard
 import com.bookisham.app.ui.components.ErrorNote
 import com.bookisham.app.ui.components.Eyebrow
@@ -93,6 +94,7 @@ fun BrowseScreen(me: Me, onOpen: (String) -> Unit, onSignedOut: () -> Unit) {
     val vm = rememberViewModel(key = "browse") { ShelfViewModel(app, browse = true) }
     if (vm.signedOut) LaunchedEffect(Unit) { onSignedOut() }
     var lockedNote by remember { mutableStateOf(false) }
+    var buyFor by remember { mutableStateOf<String?>(null) }
 
     Shelf(
         vm = vm,
@@ -110,7 +112,13 @@ fun BrowseScreen(me: Me, onOpen: (String) -> Unit, onSignedOut: () -> Unit) {
             }
         },
         empty = { EmptyCard("No books in the library yet", "") },
-        onBook = { book -> if (me.user.isAdmin || book.unlocked) onOpen(book.id) else lockedNote = true },
+        onBook = { book ->
+            when {
+                me.user.isAdmin || book.unlocked -> onOpen(book.id)
+                book.price != null -> buyFor = book.id
+                else -> lockedNote = true
+            }
+        },
     )
 
     if (lockedNote) {
@@ -120,6 +128,10 @@ fun BrowseScreen(me: Me, onOpen: (String) -> Unit, onSignedOut: () -> Unit) {
             title = { Text("Locked", style = MaterialTheme.typography.headlineSmall) },
             text = { Text("Ask your admin for access to this book.") },
         )
+    }
+
+    buyFor?.let { bookId ->
+        BuyBookDialog(books = vm.books.orEmpty(), initialBookId = bookId, onDismiss = { buyFor = null })
     }
 }
 

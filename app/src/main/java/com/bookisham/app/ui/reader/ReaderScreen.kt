@@ -7,6 +7,11 @@ import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -190,18 +195,19 @@ private fun ReaderSurface(vm: ReaderViewModel, book: BookOpen, onBack: () -> Uni
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = vm.page - 1)
     var zoom by rememberSaveable { mutableStateOf(1f) }
     var covered by remember { mutableStateOf(false) }
-    var touchStamp by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var chromeVisible by remember { mutableStateOf(true) }
+    var shownStamp by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val textMeasurer = rememberTextMeasurer()
     val watermark = remember(book.watermark) {
         textMeasurer.measure(book.watermark, TextStyle(fontSize = 16.sp, color = Color.Black))
     }
 
-    // The bars show on any touch and fade three seconds later.
-    LaunchedEffect(touchStamp) {
-        chromeVisible = true
-        delay(3000)
-        chromeVisible = false
+    // A tap on the page toggles the controls; whenever they show, they tuck away again after a few seconds.
+    LaunchedEffect(shownStamp, chromeVisible) {
+        if (chromeVisible) {
+            delay(3500)
+            chromeVisible = false
+        }
     }
 
     // Cover the pages whenever the app is not in front.
@@ -248,21 +254,31 @@ private fun ReaderSurface(vm: ReaderViewModel, book: BookOpen, onBack: () -> Uni
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
-            .background(Night)
+            .background(Brush.verticalGradient(listOf(NightPanel, Night, Night)))
             .pointerInput(Unit) {
-                // Seen before the column: a touch shows the bars; two fingers zoom.
+                // Seen before the column: a plain tap toggles the controls; two fingers zoom;
+                // a drag is left to the column to scroll.
+                val slop = viewConfiguration.touchSlop
                 awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                    touchStamp = System.currentTimeMillis()
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    var moved = false
+                    var pinched = false
                     do {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
                         val pressed = event.changes.count { it.pressed }
                         if (pressed >= 2) {
+                            pinched = true
                             val change = event.calculateZoom()
                             if (change != 1f) zoom = (zoom * change).coerceIn(0.5f, 3f)
                             event.changes.forEach { it.consume() }
+                        } else if (event.changes.any { (it.position - down.position).getDistance() > slop }) {
+                            moved = true
                         }
                     } while (event.changes.any { it.pressed })
+                    if (!moved && !pinched) {
+                        chromeVisible = !chromeVisible
+                        shownStamp = System.currentTimeMillis()
+                    }
                 }
             },
     ) {
@@ -287,18 +303,18 @@ private fun ReaderSurface(vm: ReaderViewModel, book: BookOpen, onBack: () -> Uni
 
         AnimatedVisibility(
             visible = chromeVisible,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter),
+            enter = fadeIn() + slideInVertically { -it / 2 },
+            exit = fadeOut() + slideOutVertically { -it / 2 },
+            modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             TopBar(book = book, zoom = zoom, onBack = onBack, onZoom = { zoom = it })
         }
 
         AnimatedVisibility(
             visible = chromeVisible,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = fadeIn() + slideInVertically { it / 2 },
+            exit = fadeOut() + slideOutVertically { it / 2 },
+            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(horizontal = 12.dp, vertical = 12.dp),
         ) {
             BottomBar(page = vm.page, pages = book.pages, onGo = { goTo(it) })
         }
@@ -411,29 +427,33 @@ private fun DrawScope.drawWatermark(layout: TextLayoutResult) {
     }
 }
 
+/** The controls float over the pages as two rounded panels rather than edge-to-edge bars. */
+private fun Modifier.floatingPanel(shape: RoundedCornerShape) =
+    this
+        .shadow(20.dp, shape, spotColor = Color.Black, ambientColor = Color.Black)
+        .background(NightPanel.copy(alpha = 0.96f), shape)
+        .border(1.dp, NightLine, shape)
+
 @Composable
 private fun TopBar(book: BookOpen, zoom: Float, onBack: () -> Unit, onZoom: (Float) -> Unit) {
-    Column(Modifier.fillMaxWidth().background(Night.copy(alpha = 0.92f))) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            IconPill(Icons.AutoMirrored.Filled.ArrowBack, "Back to library", onClick = onBack)
-            Column(Modifier.weight(1f)) {
-                Text(book.title, style = MaterialTheme.typography.titleMedium, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (book.author.isNotBlank()) {
-                    Text(book.author, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .floatingPanel(RoundedCornerShape(28.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        IconPill(Icons.AutoMirrored.Filled.ArrowBack, "Back to library", onClick = onBack)
+        Column(Modifier.weight(1f)) {
+            Text(book.title, style = MaterialTheme.typography.titleMedium, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (book.author.isNotBlank()) {
+                Text(book.author, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            IconPill(Icons.Filled.ZoomOut, "Zoom out", onClick = { onZoom((zoom - 0.15f).coerceAtLeast(0.5f)) })
-            Text("${(zoom * 100).roundToInt()}%", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.6f))
-            IconPill(Icons.Filled.ZoomIn, "Zoom in", onClick = { onZoom((zoom + 0.15f).coerceAtMost(3f)) })
         }
-        HorizontalDivider(color = NightLine)
+        IconPill(Icons.Filled.ZoomOut, "Zoom out", onClick = { onZoom((zoom - 0.15f).coerceAtLeast(0.5f)) })
+        Text("${(zoom * 100).roundToInt()}%", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.6f))
+        IconPill(Icons.Filled.ZoomIn, "Zoom in", onClick = { onZoom((zoom + 0.15f).coerceAtMost(3f)) })
     }
 }
 
@@ -441,17 +461,17 @@ private fun TopBar(book: BookOpen, zoom: Float, onBack: () -> Unit, onZoom: (Flo
 private fun BottomBar(page: Int, pages: Int, onGo: (Int) -> Unit) {
     val focus = LocalFocusManager.current
     var text by remember(page) { mutableStateOf(page.toString()) }
+    // The slider follows the finger while dragging and only jumps the book on release.
+    var dragging by remember { mutableStateOf<Float?>(null) }
 
-    Column(Modifier.fillMaxWidth().background(Night.copy(alpha = 0.92f))) {
-        HorizontalDivider(color = NightLine)
-        Box(Modifier.fillMaxWidth().height(2.dp).background(Color.White.copy(alpha = 0.1f))) {
-            Box(Modifier.fillMaxHeight().fillMaxWidth((page.toFloat() / pages).coerceIn(0f, 1f)).background(Ember))
-        }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .floatingPanel(RoundedCornerShape(24.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
         Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-                .navigationBarsPadding(),
+            Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
@@ -471,13 +491,30 @@ private fun BottomBar(page: Int, pages: Int, onGo: (Int) -> Unit) {
                     }),
                     modifier = Modifier
                         .width(60.dp)
-                        .background(NightPanel, RoundedCornerShape(8.dp))
-                        .border(1.dp, NightLine, RoundedCornerShape(8.dp))
+                        .background(Night, RoundedCornerShape(10.dp))
+                        .border(1.dp, NightLine, RoundedCornerShape(10.dp))
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 )
                 Text("of $pages", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.7f))
             }
             IconPill(Icons.Filled.KeyboardArrowDown, "Next page", onClick = { onGo(page + 1) }, enabled = page < pages)
+        }
+        if (pages > 1) {
+            Slider(
+                value = dragging ?: page.toFloat(),
+                onValueChange = { dragging = it },
+                onValueChangeFinished = {
+                    dragging?.let { onGo(it.roundToInt()) }
+                    dragging = null
+                },
+                valueRange = 1f..pages.toFloat(),
+                colors = SliderDefaults.colors(
+                    thumbColor = Ember,
+                    activeTrackColor = Ember,
+                    inactiveTrackColor = Color.White.copy(alpha = 0.15f),
+                ),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            )
         }
     }
 }

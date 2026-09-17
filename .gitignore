@@ -18,6 +18,10 @@ local.properties
 *.jks
 *.keystore
 
+# JVM crash dumps from a Gradle daemon that ran out of memory
+hs_err_pid*.log
+replay_pid*.log
+
 # OS / tooling noise
 .DS_Store
 Thumbs.db

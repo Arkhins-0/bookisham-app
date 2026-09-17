@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Lock
@@ -35,12 +37,15 @@ import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bookisham.app.LocalApp
 import com.bookisham.app.data.Book
+import com.bookisham.app.data.formatPrice
 import com.bookisham.app.ui.theme.Ember
+import com.bookisham.app.ui.theme.EmberDark
 import com.bookisham.app.ui.theme.Ink
 import com.bookisham.app.ui.theme.InkFaint
 import com.bookisham.app.ui.theme.PaperDeep
@@ -59,7 +64,7 @@ fun CoverImage(bookId: String, modifier: Modifier = Modifier, locked: Boolean = 
             Image(
                 bitmap = bmp.asImageBitmap(),
                 contentDescription = null,
-                modifier = Modifier.fillMaxSize().alpha(if (locked) 0.4f else 1f),
+                modifier = Modifier.fillMaxSize().alpha(if (locked) 0.65f else 1f),
                 contentScale = ContentScale.Crop,
                 colorFilter = if (locked) ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }) else null,
             )
@@ -81,7 +86,7 @@ fun BookCard(book: Book, unlocked: Boolean, onClick: () -> Unit, modifier: Modif
         ) {
             CoverImage(book.id, Modifier.fillMaxSize(), locked = !unlocked)
             if (!unlocked) {
-                Box(Modifier.fillMaxSize().background(Ink.copy(alpha = 0.3f)), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize().background(Ink.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
                     Icon(Icons.Outlined.Lock, contentDescription = "Locked", tint = Color.White, modifier = Modifier.size(24.dp))
                 }
             }
@@ -117,6 +122,39 @@ fun BookCard(book: Book, unlocked: Boolean, onClick: () -> Unit, modifier: Modif
             caption.uppercase(),
             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Normal, letterSpacing = 1.sp),
             color = InkFaint,
+        )
+        book.price?.let { PriceRow(book) }
+    }
+}
+
+/** The price the admin set for this book, with the discount applied when there is one. */
+@Composable
+private fun PriceRow(book: Book) {
+    Spacer(Modifier.height(4.dp))
+    if (book.hasDiscount) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                book.discountedPrice?.let { formatPrice(it) }.orEmpty(),
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = EmberDark,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                book.price?.let { formatPrice(it) }.orEmpty(),
+                style = MaterialTheme.typography.bodySmall.copy(textDecoration = TextDecoration.LineThrough),
+                color = InkFaint,
+            )
+        }
+        Text(
+            "${book.discountPercent}% off",
+            style = MaterialTheme.typography.bodySmall,
+            color = Ember,
+        )
+    } else {
+        Text(
+            book.price?.let { formatPrice(it) }.orEmpty(),
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = Ink,
         )
     }
 }

@@ -49,11 +49,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bookisham.app.LocalApp
 import com.bookisham.app.data.AdminBook
 import com.bookisham.app.data.PickedFile
+import com.bookisham.app.data.formatPrice
 import com.bookisham.app.ui.AdminBooksViewModel
 import com.bookisham.app.ui.components.AdminSection
 import com.bookisham.app.ui.components.AdminSectionTabs
@@ -80,7 +82,12 @@ import com.bookisham.app.ui.theme.InkFaint
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AdminBooksScreen(onPreview: (String) -> Unit, onOpenReaders: () -> Unit, onSignedOut: () -> Unit) {
+fun AdminBooksScreen(
+    onPreview: (String) -> Unit,
+    onOpenReaders: () -> Unit,
+    onOpenPurchases: () -> Unit,
+    onSignedOut: () -> Unit,
+) {
     val app = LocalApp.current
     val vm = rememberViewModel(key = "admin-books") { AdminBooksViewModel(app) }
     if (vm.signedOut) LaunchedEffect(Unit) { onSignedOut() }
@@ -97,7 +104,13 @@ fun AdminBooksScreen(onPreview: (String) -> Unit, onOpenReaders: () -> Unit, onS
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
             item {
                 Column(Modifier.padding(horizontal = 20.dp, vertical = 24.dp)) {
-                    AdminSectionTabs(AdminSection.Books) { if (it == AdminSection.Readers) onOpenReaders() }
+                    AdminSectionTabs(AdminSection.Books) {
+                        when (it) {
+                            AdminSection.Readers -> onOpenReaders()
+                            AdminSection.Purchases -> onOpenPurchases()
+                            AdminSection.Books -> {}
+                        }
+                    }
                     Spacer(Modifier.height(16.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -210,6 +223,14 @@ private fun BookRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = InkFaint,
             )
+            book.price?.let { price ->
+                val discount = book.discountPercent?.takeIf { it > 0 }
+                Text(
+                    if (discount != null) "${formatPrice(price * (100 - discount) / 100.0)} (was ${formatPrice(price)}, $discount% off)" else formatPrice(price),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Ember,
+                )
+            }
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Pill("Preview", onClick = onPreview, style = PillStyle.Ghost, icon = Icons.Outlined.Visibility, compact = true)
@@ -234,6 +255,8 @@ private fun BookFormSheetContent(vm: AdminBooksViewModel, editing: AdminBook?, o
     var allUsers by rememberSaveable(editing?.id) { mutableStateOf(false) }
     var file by remember(editing?.id) { mutableStateOf<PickedFile?>(null) }
     var cover by remember(editing?.id) { mutableStateOf<PickedFile?>(null) }
+    var price by rememberSaveable(editing?.id) { mutableStateOf(editing?.price?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() } ?: "") }
+    var discountPercent by rememberSaveable(editing?.id) { mutableStateOf(editing?.discountPercent?.toString() ?: "") }
 
     val pickBook = rememberBookFilePicker { file = it }
     val pickCover = rememberCoverPicker { cover = it }
@@ -286,6 +309,18 @@ private fun BookFormSheetContent(vm: AdminBooksViewModel, editing: AdminBook?, o
             style = PillStyle.Ghost,
             icon = Icons.Outlined.Image,
         )
+        Spacer(Modifier.height(14.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(Modifier.weight(1f)) {
+                FieldLabel("Price (optional)")
+                TextBox(price, { price = it }, keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
+            }
+            Column(Modifier.weight(1f)) {
+                FieldLabel("Discount % (optional)")
+                TextBox(discountPercent, { discountPercent = it }, keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)
+            }
+        }
 
         if (editing == null) {
             Spacer(Modifier.height(14.dp))
@@ -318,9 +353,9 @@ private fun BookFormSheetContent(vm: AdminBooksViewModel, editing: AdminBook?, o
             },
             onClick = {
                 if (editing != null) {
-                    vm.edit(editing.id, title, author, file, cover)
+                    vm.edit(editing.id, title, author, file, cover, price, discountPercent)
                 } else {
-                    file?.let { vm.upload(title, author, allUsers, it, cover) }
+                    file?.let { vm.upload(title, author, allUsers, it, cover, price, discountPercent) }
                 }
             },
             modifier = Modifier.fillMaxWidth(),

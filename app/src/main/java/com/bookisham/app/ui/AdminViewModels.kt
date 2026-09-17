@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bookisham.app.BookishamApplication
 import com.bookisham.app.data.AdminBook
+import com.bookisham.app.data.AdminPurchaseRequest
 import com.bookisham.app.data.AdminUser
 import com.bookisham.app.data.AdminUserDetail
 import com.bookisham.app.data.PickedFile
@@ -197,7 +198,15 @@ class AdminBooksViewModel(private val app: BookishamApplication) : ViewModel() {
         }
     }
 
-    fun upload(title: String, author: String, allUsers: Boolean, file: PickedFile, cover: PickedFile?) {
+    fun upload(
+        title: String,
+        author: String,
+        allUsers: Boolean,
+        file: PickedFile,
+        cover: PickedFile?,
+        price: String,
+        discountPercent: String,
+    ) {
         if (saving) return
         saving = true
         saveError = null
@@ -211,6 +220,8 @@ class AdminBooksViewModel(private val app: BookishamApplication) : ViewModel() {
                     allUsers = allUsers,
                     file = file,
                     cover = cover,
+                    price = price.trim().ifBlank { null },
+                    discountPercent = discountPercent.trim().ifBlank { null },
                 )
                 saveDone = "“${result.title}” added — ${result.pages} pages."
                 load()
@@ -223,7 +234,15 @@ class AdminBooksViewModel(private val app: BookishamApplication) : ViewModel() {
         }
     }
 
-    fun edit(bookId: String, title: String, author: String, file: PickedFile?, cover: PickedFile?) {
+    fun edit(
+        bookId: String,
+        title: String,
+        author: String,
+        file: PickedFile?,
+        cover: PickedFile?,
+        price: String,
+        discountPercent: String,
+    ) {
         if (saving) return
         saving = true
         saveError = null
@@ -236,6 +255,8 @@ class AdminBooksViewModel(private val app: BookishamApplication) : ViewModel() {
                     author = author.trim(),
                     file = file,
                     cover = cover,
+                    price = price.trim().ifBlank { null },
+                    discountPercent = discountPercent.trim().ifBlank { null },
                 )
                 saveDone = "Saved — ${result.pages} pages."
                 load()
@@ -267,5 +288,57 @@ class AdminBooksViewModel(private val app: BookishamApplication) : ViewModel() {
     fun clearSaveState() {
         saveError = null
         saveDone = null
+    }
+}
+
+/** Purchase requests awaiting the admin's eye: GET /api/admin/purchase-requests, and deciding on them. */
+class AdminPurchasesViewModel(private val app: BookishamApplication) : ViewModel() {
+    var requests: List<AdminPurchaseRequest>? by mutableStateOf(null)
+        private set
+    var error: String? by mutableStateOf(null)
+        private set
+    var refreshing: Boolean by mutableStateOf(false)
+        private set
+    var signedOut: Boolean by mutableStateOf(false)
+        private set
+
+    var busyId: String? by mutableStateOf(null)
+        private set
+    var actionError: String? by mutableStateOf(null)
+
+    init {
+        load()
+    }
+
+    fun load(byUser: Boolean = false) {
+        viewModelScope.launch {
+            refreshing = byUser
+            error = null
+            try {
+                requests = app.api.adminPurchaseRequests()
+            } catch (e: UnauthorizedException) {
+                signedOut = true
+            } catch (e: Exception) {
+                error = e.message ?: "Purchase requests could not be loaded."
+            }
+            refreshing = false
+        }
+    }
+
+    fun act(id: String, action: String) {
+        if (busyId != null) return
+        busyId = id
+        actionError = null
+        viewModelScope.launch {
+            try {
+                app.api.adminPurchaseRequestAction(id, action)
+                load()
+            } catch (e: UnauthorizedException) {
+                signedOut = true
+            } catch (e: Exception) {
+                actionError = e.message ?: "That did not work."
+            }
+            busyId = null
+        }
     }
 }
