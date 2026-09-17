@@ -4,6 +4,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -63,7 +66,22 @@ fun UpdateAvailableDialog(
                     )
                     UpdateStage.Installing -> Text("Android is asking you to confirm the install.")
                     is UpdateStage.Failed -> Text(stage.message)
-                    UpdateStage.Idle -> Text("Bookisham v${info.version} is ready. It downloads here in the app.")
+                    UpdateStage.Idle -> {
+                        Text("Bookisham v${info.version} is ready. It downloads here in the app.")
+                        if (info.notes.isNotBlank()) {
+                            Spacer(Modifier.height(12.dp))
+                            Text("What changed", style = MaterialTheme.typography.labelLarge)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                info.notes.trim(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = InkFaint,
+                                modifier = Modifier
+                                    .heightIn(max = 200.dp)
+                                    .verticalScroll(rememberScrollState()),
+                            )
+                        }
+                    }
                 }
             }
         },

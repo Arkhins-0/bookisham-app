@@ -17,7 +17,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -62,6 +64,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -131,6 +134,11 @@ import kotlin.math.roundToInt
  * email of the reader is tiled faintly across every page.
  */
 private const val PAGE_MAX_WIDTH_DP = 920
+private const val MAX_ZOOM = 3f
+private const val DOUBLE_TAP_ZOOM = 2f
+
+/** Where to scroll after a zoom, so the point under the fingers stays under them. */
+private data class ZoomAnchor(val index: Int, val itemOffset: Int, val horizontal: Int)
 
 @Composable
 fun ReaderScreen(bookId: String, onBack: () -> Unit, onSignedOut: () -> Unit) {
@@ -193,8 +201,10 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 @Composable
 private fun ReaderSurface(vm: ReaderViewModel, book: BookOpen, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = vm.page - 1)
     var zoom by rememberSaveable { mutableStateOf(1f) }
+    var anchor by remember { mutableStateOf<ZoomAnchor?>(null) }
     var covered by remember { mutableStateOf(false) }
     var chromeVisible by remember { mutableStateOf(true) }
     var shownStamp by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -237,16 +247,6 @@ private fun ReaderSurface(vm: ReaderViewModel, book: BookOpen, onBack: () -> Uni
             .collect { vm.onPage(it + 1) }
     }
 
-    // Keep the current page in place once a zoom has settled.
-    var settledZoom by remember { mutableStateOf(zoom) }
-    LaunchedEffect(zoom) {
-        delay(150)
-        if (settledZoom != zoom) {
-            settledZoom = zoom
-            listState.scrollToItem(vm.page - 1)
-        }
-    }
-
     fun goTo(n: Int) {
         val target = n.coerceIn(1, book.pages)
         scope.launch { listState.animateScrollToItem(target - 1) }
@@ -255,44 +255,87 @@ private fun ReaderSurface(vm: ReaderViewModel, book: BookOpen, onBack: () -> Uni
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(NightPanel, Night, Night)))
-            .pointerInput(Unit) {
-                // Seen before the column: a plain tap toggles the controls; two fingers zoom;
-                // a drag is left to the column to scroll.
-                val slop = viewConfiguration.touchSlop
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                    var moved = false
-                    var pinched = false
-                    do {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        val pressed = event.changes.count { it.pressed }
-                        if (pressed >= 2) {
-                            pinched = true
-                            val change = event.calculateZoom()
-                            if (change != 1f) zoom = (zoom * change).coerceIn(0.5f, 3f)
-                            event.changes.forEach { it.consume() }
-                        } else if (event.changes.any { (it.position - down.position).getDistance() > slop }) {
-                            moved = true
-                        }
-                    } while (event.changes.any { it.pressed })
-                    if (!moved && !pinched) {
-                        chromeVisible = !chromeVisible
-                        shownStamp = System.currentTimeMillis()
-                    }
-                }
-            },
+            .background(Brush.verticalGradient(listOf(NightPanel, Night, Night))),
     ) {
         val stageWidth = maxWidth
-        val pageWidth: Dp = ((stageWidth - 32.dp).coerceAtMost(PAGE_MAX_WIDTH_DP.dp) * zoom).coerceAtLeast(160.dp)
+        // Fit-to-width is the floor: a page never shrinks below the screen.
+        val fitWidth = (stageWidth - 32.dp).coerceAtMost(PAGE_MAX_WIDTH_DP.dp)
+        val pageWidth: Dp = fitWidth * zoom
         val hScroll = rememberScrollState()
+        val gutter = with(density) { 32.dp.toPx() }
+        val centre = with(density) { Offset(stageWidth.toPx() / 2f, maxHeight.toPx() / 2f) }
 
-        Box(Modifier.fillMaxSize().horizontalScroll(hScroll)) {
+        // Change the zoom about [focus] — between the fingers, where a double
+        // tap landed, or the middle of the screen for the buttons — and work
+        // out where to scroll so that point stays put. Zooming is a change of
+        // layout width, so without this the pages simply grow from the corner.
+        fun zoomTo(target: Float, focus: Offset) {
+            val next = target.coerceIn(1f, MAX_ZOOM)
+            val factor = next / zoom
+            if (abs(factor - 1f) < 0.0005f) return
+
+            val info = listState.layoutInfo
+            val page = info.visibleItemsInfo.firstOrNull { focus.y >= it.offset && focus.y < it.offset + it.size }
+                ?: info.visibleItemsInfo.minByOrNull { abs(it.offset + it.size / 2f - focus.y) }
+            val vertical = page?.takeIf { it.size > 0 }?.let {
+                val fraction = ((focus.y - it.offset) / it.size.toFloat()).coerceIn(0f, 1f)
+                it.index to (fraction * it.size * factor - focus.y).roundToInt()
+            }
+            // The gutter either side of a page does not scale; the page does.
+            val xInPage = hScroll.value + focus.x - gutter / 2f
+            anchor = ZoomAnchor(
+                index = vertical?.first ?: -1,
+                itemOffset = vertical?.second ?: 0,
+                horizontal = (xInPage * factor + gutter / 2f - focus.x).roundToInt(),
+            )
+            zoom = next
+        }
+
+        LaunchedEffect(anchor) {
+            val target = anchor ?: return@LaunchedEffect
+            if (target.index >= 0) listState.scrollToItem(target.index, target.itemOffset)
+            // The column is re-measured at its new width on the next frame;
+            // only then has the horizontal scroll the room to move.
+            withFrameNanos { }
+            hScroll.scrollTo(target.horizontal.coerceAtLeast(0))
+            anchor = null
+        }
+
+        Box(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    // Two fingers zoom about the point between them, seen on the
+                    // initial pass before the column can take it for a scroll.
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        do {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            if (event.changes.count { it.pressed } >= 2) {
+                                val change = event.calculateZoom()
+                                if (change != 1f) zoomTo(zoom * change, event.calculateCentroid())
+                                event.changes.forEach { it.consume() }
+                            }
+                        } while (event.changes.any { it.pressed })
+                    }
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = {
+                            chromeVisible = !chromeVisible
+                            shownStamp = System.currentTimeMillis()
+                        },
+                        // In where it landed, and back to the full page on the next one.
+                        onDoubleTap = { at -> zoomTo(if (zoom > 1.01f) 1f else DOUBLE_TAP_ZOOM, at) },
+                    )
+                }
+                .horizontalScroll(hScroll),
+        ) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.width(pageWidth + 32.dp).fillMaxHeight(),
                 contentPadding = PaddingValues(top = 84.dp, bottom = 120.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 items(count = book.pages, key = { it }) { index ->
@@ -308,7 +351,7 @@ private fun ReaderSurface(vm: ReaderViewModel, book: BookOpen, onBack: () -> Uni
             exit = fadeOut() + slideOutVertically { -it / 2 },
             modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            TopBar(book = book, zoom = zoom, onBack = onBack, onZoom = { zoom = it })
+            TopBar(book = book, zoom = zoom, onBack = onBack, onZoom = { zoomTo(it, centre) })
         }
 
         AnimatedVisibility(
@@ -457,9 +500,10 @@ private fun TopBar(book: BookOpen, zoom: Float, onBack: () -> Unit, onZoom: (Flo
                 Text(book.author, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        IconPill(Icons.Filled.ZoomOut, "Zoom out", onClick = { onZoom((zoom - 0.15f).coerceAtLeast(0.5f)) })
+        // zoomTo clamps to the fit-to-width floor and the ceiling.
+        IconPill(Icons.Filled.ZoomOut, "Zoom out", onClick = { onZoom(zoom - 0.15f) }, enabled = zoom > 1f)
         Text("${(zoom * 100).roundToInt()}%", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.6f))
-        IconPill(Icons.Filled.ZoomIn, "Zoom in", onClick = { onZoom((zoom + 0.15f).coerceAtMost(3f)) })
+        IconPill(Icons.Filled.ZoomIn, "Zoom in", onClick = { onZoom(zoom + 0.15f) }, enabled = zoom < MAX_ZOOM)
     }
 }
 

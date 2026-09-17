@@ -72,10 +72,26 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # The whole history, so the last tag can be found.
       - uses: actions/download-artifact@v4
         with:
           name: apks
           path: apks
+      - name: Write the changelog
+        # Every commit since the last tag becomes the release body. The app
+        # shows this in its update prompt, so it has to read as a changelog —
+        # which is also why commit subjects are worth writing carefully.
+        run: |
+          previous=$(git describe --tags --abbrev=0 "${{ github.ref_name }}^" 2>/dev/null || true)
+          range="${previous:+$previous..}${{ github.ref_name }}"
+          {
+            echo "## What changed"
+            echo
+            git log --no-merges --pretty='- %s' "$range" | grep -v '^- Version [0-9]' || echo "- Small fixes and improvements."
+          } > NOTES.md
+          cat NOTES.md
       - name: Rename and checksum
         run: |
           mkdir -p dist
@@ -87,4 +103,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          generate_release_notes: true
+          body_path: NOTES.md
