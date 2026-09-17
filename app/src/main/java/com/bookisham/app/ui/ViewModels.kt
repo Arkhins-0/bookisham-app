@@ -229,7 +229,13 @@ class BuyBookViewModel(private val app: BookishamApplication) : ViewModel() {
         private set
     var error: String? by mutableStateOf(null)
         private set
-    var done: Boolean by mutableStateOf(false)
+
+    /**
+     * Which book the last request went in for — not merely "done". One of
+     * these outlives the sheet, so a plain flag would greet the next book
+     * with the last one's thank-you and hide its payment form.
+     */
+    var doneFor: String? by mutableStateOf(null)
         private set
 
     fun submit(bookId: String, screenshot: PickedFile) {
@@ -239,12 +245,17 @@ class BuyBookViewModel(private val app: BookishamApplication) : ViewModel() {
         viewModelScope.launch {
             try {
                 app.api.submitPurchaseRequest(bookId, screenshot)
-                done = true
+                doneFor = bookId
             } catch (e: Exception) {
                 error = e.message ?: "Could not submit your request."
             }
             submitting = false
         }
+    }
+
+    /** The sheet has opened: whatever went wrong last time is not this book's problem. */
+    fun clearError() {
+        error = null
     }
 }
 

@@ -21,6 +21,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,6 +59,11 @@ fun BuyBookDialog(books: List<Book>, initialBookId: String, onDismiss: () -> Uni
     var screenshot by remember { mutableStateOf<PickedFile?>(null) }
     val pickScreenshot = rememberCoverPicker { screenshot = it }
 
+    // Only this book's own request counts as sent; a pending request on one
+    // book must not stop the reader buying the next.
+    val sent = vm.doneFor == initialBookId
+    LaunchedEffect(initialBookId) { vm.clearError() }
+
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
@@ -67,11 +73,18 @@ fun BuyBookDialog(books: List<Book>, initialBookId: String, onDismiss: () -> Uni
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 32.dp),
         ) {
-            if (vm.done) {
+            if (sent) {
                 Column(Modifier.padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = Ember, modifier = Modifier.size(48.dp))
                     Spacer(Modifier.height(16.dp))
                     Text("Thanks — request sent", style = MaterialTheme.typography.headlineSmall)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        selected?.title.orEmpty(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Ink,
+                        textAlign = TextAlign.Center,
+                    )
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "We'll review your payment and approve it within 24 hours. You'll get a notification either way.",
